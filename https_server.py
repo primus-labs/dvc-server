@@ -44,10 +44,20 @@ def run_command_succinct(requestid, attestationData):
         if result.stderr:
             print("[ERROR]:", result.stderr)
 
-        # proof = ""
-        # if os.path.exists(f"{output_dir}/proof.bin"):
-        #     with open(f"{output_dir}/proof.bin", "r", encoding="utf-8") as f:
-        #         proof = f.read()
+        proof_id = ""
+        if os.path.exists(f"{output_dir}/proof_id.json"):
+            with open(f"{output_dir}/proof_id.json", "r", encoding="utf-8") as f:
+                proof_id = f.read()
+
+        proof = ""
+        if os.path.exists(f"{output_dir}/proof.json"):
+            with open(f"{output_dir}/proof.json", "r", encoding="utf-8") as f:
+                proof = f.read()
+
+        vk = ""
+        if os.path.exists(f"{output_dir}/vk.json"):
+            with open(f"{output_dir}/vk.json", "r", encoding="utf-8") as f:
+                vk = f.read()
 
         t_end = time.perf_counter()
         tasks[requestid] = {
@@ -55,8 +65,9 @@ def run_command_succinct(requestid, attestationData):
             "returncode": result.returncode,
             "stdout": result.stdout,
             "stderr": result.stderr,
-            # "pv_file": pv_file,
-            # "proof": proof,
+            "proof_id": proof_id,
+            "vk": vk,
+            "proof": proof,
             "elapsed": f"{t_end - t_start:.6f}",
         }
         print(f"[ELAPSED]: {t_end - t_start:.6f}")
@@ -68,7 +79,8 @@ def run_command_succinct(requestid, attestationData):
             "returncode": -1,
             "stdout": "",
             "stderr": str(e),
-            "pv_file": "",
+            "proof_id": "",
+            "vk": "",
             "proof": "",
             "elapsed": f"{t_end - t_start:.6f}",
         }
