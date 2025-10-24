@@ -6,6 +6,9 @@ import json
 import os
 from multiprocessing import Process, Value, Manager
 import time
+from dotenv import load_dotenv
+
+load_dotenv(override=True)
 
 is_busy = Value("i", 0)  # 0: idle, 1: busy
 manager = Manager()
@@ -44,20 +47,10 @@ def run_command_succinct(requestid, attestationData):
         if result.stderr:
             print("[ERROR]:", result.stderr)
 
-        proof_id = ""
-        if os.path.exists(f"{output_dir}/proof_id.json"):
-            with open(f"{output_dir}/proof_id.json", "r", encoding="utf-8") as f:
-                proof_id = f.read()
-
-        proof = ""
-        if os.path.exists(f"{output_dir}/proof.json"):
-            with open(f"{output_dir}/proof.json", "r", encoding="utf-8") as f:
-                proof = f.read()
-
-        vk = ""
-        if os.path.exists(f"{output_dir}/vk.json"):
-            with open(f"{output_dir}/vk.json", "r", encoding="utf-8") as f:
-                vk = f.read()
+        proof_fixture = ""
+        if os.path.exists(f"{output_dir}/proof_fixture.json"):
+            with open(f"{output_dir}/proof_fixture.json", "r", encoding="utf-8") as f:
+                proof_fixture = f.read()
 
         t_end = time.perf_counter()
         tasks[requestid] = {
@@ -65,9 +58,7 @@ def run_command_succinct(requestid, attestationData):
             "returncode": result.returncode,
             "stdout": result.stdout,
             "stderr": result.stderr,
-            "proof_id": proof_id,
-            "vk": vk,
-            "proof": proof,
+            "proof_fixture": proof_fixture,
             "elapsed": f"{t_end - t_start:.6f}",
         }
         print(f"[ELAPSED]: {t_end - t_start:.6f}")
@@ -79,9 +70,7 @@ def run_command_succinct(requestid, attestationData):
             "returncode": -1,
             "stdout": "",
             "stderr": str(e),
-            "proof_id": "",
-            "vk": "",
-            "proof": "",
+            "proof_fixture": "",
             "elapsed": f"{t_end - t_start:.6f}",
         }
         print(f"[ELAPSED]: {t_end - t_start:.6f}")
@@ -98,6 +87,12 @@ class SimpleHTTPSRequestHandler(http.server.SimpleHTTPRequestHandler):
         self.send_header("Referrer-Policy", "strict-origin-when-cross-origin")
         super().end_headers()
 
+    def end_200(self, data):
+        self.send_response(200)
+        self.send_header("Content-type", "application/json")
+        self.end_headers()
+        self.wfile.write(json.dumps(data, ensure_ascii=False).encode("utf-8"))
+
     def do_OPTIONS(self):  # Handle preflight requests
         self.send_response(200, "OK")
         self.end_headers()
@@ -105,10 +100,7 @@ class SimpleHTTPSRequestHandler(http.server.SimpleHTTPRequestHandler):
     def do_POST(self):
         if self.path not in ["/zktls/prove", "/zktls/result"]:
             data = {"code": "10001", "description": "only support /zktls/prove, /zktls/result"}
-            self.send_response(404)
-            self.send_header("Content-type", "application/json")
-            self.end_headers()
-            self.wfile.write(json.dumps(data, ensure_ascii=False).encode("utf-8"))
+            self.end_200(data)
             return
 
         content_length = int(self.headers.get("Content-Length", 0))
@@ -118,13 +110,17 @@ class SimpleHTTPSRequestHandler(http.server.SimpleHTTPRequestHandler):
         data = json.loads(body)
         requestid = data["requestid"]
 
-        if self.path == "/zktls/prove":
+        if self.path == "/zktls/is_busy":
             if is_busy.value == 1:
                 data = {"code": "10002", "description": "Server is busy, please try later."}
-                self.send_response(200)
-                self.send_header("Content-type", "application/json")
-                self.end_headers()
-                self.wfile.write(json.dumps(data, ensure_ascii=False).encode("utf-8"))
+                self.end_200(data)
+            else:
+                data = {"code": "0", "description": "free."}
+                self.end_200(data)
+        elif self.path == "/zktls/prove":
+            if is_busy.value == 1:
+                data = {"code": "10002", "description": "Server is busy, please try later."}
+                self.end_200(data)
                 return
 
             # the body is json string
@@ -141,18 +137,12 @@ class SimpleHTTPSRequestHandler(http.server.SimpleHTTPRequestHandler):
 
             # response
             data = {"code": "0", "description": "success"}
-            self.send_response(200)
-            self.send_header("Content-type", "application/json")
-            self.end_headers()
-            self.wfile.write(json.dumps(data, ensure_ascii=False).encode("utf-8"))
+            self.end_200(data)
         elif self.path == "/zktls/result":
             task = tasks.get(requestid)
             if not task:
                 data = {"code": "10003", "description": f"requestid {requestid} not exist!"}
-                self.send_response(200)
-                self.send_header("Content-type", "application/json")
-                self.end_headers()
-                self.wfile.write(json.dumps(data, ensure_ascii=False).encode("utf-8"))
+                self.end_200(data)
                 return
 
             data = {
@@ -160,10 +150,7 @@ class SimpleHTTPSRequestHandler(http.server.SimpleHTTPRequestHandler):
                 "description": "success",
                 "details": task,
             }
-            self.send_response(200)
-            self.send_header("Content-type", "application/json")
-            self.end_headers()
-            self.wfile.write(json.dumps(data, ensure_ascii=False).encode("utf-8"))
+            self.end_200(data)
 
 
 useSSL = False
