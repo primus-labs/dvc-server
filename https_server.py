@@ -20,7 +20,7 @@ start = time.perf_counter()
 # print("env", env)
 
 
-def run_command_succinct(requestid, attestationData):
+def run_command_succinct(version, requestid, attestationData):
     t_start = time.perf_counter()
     try:
         input_dir = f"./request_data"
@@ -40,6 +40,8 @@ def run_command_succinct(requestid, attestationData):
             "--output-dir",
             output_dir,
         ]
+        if version is not None:
+            cmd[0] = f"./bin/zktls.{version}"
         print("[CMD]", cmd)
         result = subprocess.run(cmd, capture_output=True, text=True)
         # result = subprocess.run(cmd, capture_output=True, text=True, env=env)
@@ -108,7 +110,9 @@ class SimpleHTTPSRequestHandler(http.server.SimpleHTTPRequestHandler):
         print("body", body)
 
         data = json.loads(body)
+        data.setdefault("version", None)
         requestid = data["requestid"]
+        version = data["version"]
 
         if self.path == "/zktls/is_busy":
             if is_busy.value == 1:
@@ -133,7 +137,7 @@ class SimpleHTTPSRequestHandler(http.server.SimpleHTTPRequestHandler):
             tasks[requestid] = {"status": "running"}
 
             # execute prove program
-            Process(target=run_command_succinct, args=(requestid, attestationData)).start()
+            Process(target=run_command_succinct, args=(version, requestid, attestationData)).start()
 
             # response
             data = {"code": "0", "description": "success"}
