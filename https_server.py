@@ -15,10 +15,6 @@ manager = Manager()
 tasks = manager.dict()
 start = time.perf_counter()
 
-# env = os.environ.copy()
-# env["SP1_PROVER"] = "mock"
-# print("env", env)
-
 
 def run_command_succinct(version, requestid, attestationData):
     t_start = time.perf_counter()
@@ -157,14 +153,20 @@ class SimpleHTTPSRequestHandler(http.server.SimpleHTTPRequestHandler):
             self.end_200(data)
 
 
-useSSL = False
-port = 38080
+port = int(os.getenv("PORT", 8080))
+use_ssl = os.getenv("USE_SSL", "OFF").upper() == "ON"
+certfile = os.getenv("CERTFILE")
+keyfile = os.getenv("KEYFILE")
+if use_ssl:
+    if not certfile or not keyfile:
+        raise ValueError("SSL enabled but CERTFILE or KEYFILE not provided.")
+
 httpd = http.server.HTTPServer(("0.0.0.0", port), SimpleHTTPSRequestHandler)
 
-if useSSL:
+if use_ssl:
     context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
-    context.load_cert_chain(certfile="./certs/server.crt", keyfile="./certs/server.key")
+    context.load_cert_chain(certfile=certfile, keyfile=keyfile)
     httpd.socket = context.wrap_socket(httpd.socket, server_side=True)
 
-print(f'Serving HTTP{"S" if useSSL else ""} on 0.0.0.0 port {port}')
+print(f'Serving HTTP{"S" if use_ssl else ""} on 0.0.0.0:{port}')
 httpd.serve_forever()
