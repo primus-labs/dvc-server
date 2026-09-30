@@ -2,11 +2,12 @@ import http.server
 import ssl
 import json
 import subprocess
-import json
 import os
 from multiprocessing import Process, Value, Manager
 import time
+from pathlib import Path
 from dotenv import load_dotenv
+from request_paths import build_job_paths, validate_request_id
 
 load_dotenv(override=True)
 
@@ -19,12 +20,9 @@ start = time.perf_counter()
 def run_command_succinct(version, requestid, attestationData):
     t_start = time.perf_counter()
     try:
-        input_dir = f"./request_data"
-        output_dir = f"./proof_output/{requestid}"
-        os.makedirs(input_dir, exist_ok=True)
-        os.makedirs(output_dir, exist_ok=True)
-
-        input_file = f"{input_dir}/{requestid}.json"
+        input_file, output_dir = build_job_paths(requestid, Path.cwd())
+        input_file.parent.mkdir(parents=True, exist_ok=True)
+        output_dir.mkdir(parents=True, exist_ok=True)
         with open(input_file, "w", encoding="utf-8") as f:
             f.write(attestationData)
 
@@ -32,9 +30,9 @@ def run_command_succinct(version, requestid, attestationData):
             "./bin/zktls",
             "--prove",
             "--input",
-            input_file,
+            str(input_file),
             "--output-dir",
-            output_dir,
+            str(output_dir),
         ]
         if version is not None:
             cmd[0] = f"./bin/zktls.{version}"
@@ -46,8 +44,9 @@ def run_command_succinct(version, requestid, attestationData):
             print("[ERROR]:", result.stderr)
 
         proof_fixture = ""
-        if os.path.exists(f"{output_dir}/proof_fixture.json"):
-            with open(f"{output_dir}/proof_fixture.json", "r", encoding="utf-8") as f:
+        proof_fixture_path = output_dir / "proof_fixture.json"
+        if proof_fixture_path.exists():
+            with open(proof_fixture_path, "r", encoding="utf-8") as f:
                 proof_fixture = f.read()
 
         t_end = time.perf_counter()
@@ -91,6 +90,12 @@ class SimpleHTTPSRequestHandler(http.server.SimpleHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(json.dumps(data, ensure_ascii=False).encode("utf-8"))
 
+    def end_400(self, data):
+        self.send_response(400)
+        self.send_header("Content-type", "application/json")
+        self.end_headers()
+        self.wfile.write(json.dumps(data, ensure_ascii=False).encode("utf-8"))
+
     def do_OPTIONS(self):  # Handle preflight requests
         self.send_response(200, "OK")
         self.end_headers()
@@ -107,7 +112,11 @@ class SimpleHTTPSRequestHandler(http.server.SimpleHTTPRequestHandler):
 
         data = json.loads(body)
         data.setdefault("version", None)
-        requestid = data["requestid"]
+        try:
+            requestid = validate_request_id(data["requestid"])
+        except (KeyError, ValueError) as error:
+            self.end_400({"code": "10004", "description": str(error)})
+            return
         version = data["version"]
 
         if self.path == "/zktls/is_busy":
