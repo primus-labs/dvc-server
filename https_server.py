@@ -8,12 +8,9 @@ from multiprocessing import Process, Value, Manager
 import time
 from dotenv import load_dotenv
 
-load_dotenv(override=True)
-
-is_busy = Value("i", 0)  # 0: idle, 1: busy
-manager = Manager()
-tasks = manager.dict()
-start = time.perf_counter()
+is_busy = None
+manager = None
+tasks = None
 
 
 def run_command_succinct(version, requestid, attestationData):
@@ -76,7 +73,7 @@ def run_command_succinct(version, requestid, attestationData):
         is_busy.value = 0
 
 
-class SimpleHTTPSRequestHandler(http.server.SimpleHTTPRequestHandler):
+class SimpleHTTPSRequestHandler(http.server.BaseHTTPRequestHandler):
     def end_headers(self):
         self.send_header("Access-Control-Allow-Origin", "*")
         self.send_header("Access-Control-Allow-Methods", "GET,POST,OPTIONS")
@@ -90,6 +87,20 @@ class SimpleHTTPSRequestHandler(http.server.SimpleHTTPRequestHandler):
         self.send_header("Content-type", "application/json")
         self.end_headers()
         self.wfile.write(json.dumps(data, ensure_ascii=False).encode("utf-8"))
+
+    def _method_not_allowed(self):
+        self.send_response(405)
+        self.send_header("Allow", "POST, OPTIONS")
+        self.send_header("Content-Length", "0")
+        self.end_headers()
+
+    def do_GET(self):
+        # This service is an API, not a static file server. In particular,
+        # never let the default handler expose .env or proof files from cwd.
+        self._method_not_allowed()
+
+    def do_HEAD(self):
+        self._method_not_allowed()
 
     def do_OPTIONS(self):  # Handle preflight requests
         self.send_response(200, "OK")
@@ -153,20 +164,29 @@ class SimpleHTTPSRequestHandler(http.server.SimpleHTTPRequestHandler):
             self.end_200(data)
 
 
-port = int(os.getenv("PORT", 8080))
-use_ssl = os.getenv("USE_SSL", "OFF").upper() == "ON"
-certfile = os.getenv("CERTFILE")
-keyfile = os.getenv("KEYFILE")
-if use_ssl:
-    if not certfile or not keyfile:
+def main():
+    global is_busy, manager, tasks
+    load_dotenv(override=True)
+    is_busy = Value("i", 0)  # 0: idle, 1: busy
+    manager = Manager()
+    tasks = manager.dict()
+
+    port = int(os.getenv("PORT", 8080))
+    use_ssl = os.getenv("USE_SSL", "OFF").upper() == "ON"
+    certfile = os.getenv("CERTFILE")
+    keyfile = os.getenv("KEYFILE")
+    if use_ssl and (not certfile or not keyfile):
         raise ValueError("SSL enabled but CERTFILE or KEYFILE not provided.")
 
-httpd = http.server.HTTPServer(("0.0.0.0", port), SimpleHTTPSRequestHandler)
+    httpd = http.server.HTTPServer(("0.0.0.0", port), SimpleHTTPSRequestHandler)
+    if use_ssl:
+        context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+        context.load_cert_chain(certfile=certfile, keyfile=keyfile)
+        httpd.socket = context.wrap_socket(httpd.socket, server_side=True)
 
-if use_ssl:
-    context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
-    context.load_cert_chain(certfile=certfile, keyfile=keyfile)
-    httpd.socket = context.wrap_socket(httpd.socket, server_side=True)
+    print(f'Serving HTTP{"S" if use_ssl else ""} on 0.0.0.0:{port}')
+    httpd.serve_forever()
 
-print(f'Serving HTTP{"S" if use_ssl else ""} on 0.0.0.0:{port}')
-httpd.serve_forever()
+
+if __name__ == "__main__":
+    main()
